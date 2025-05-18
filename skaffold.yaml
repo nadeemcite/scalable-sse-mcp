@@ -16,7 +16,7 @@ deploy:
   helm:
     releases:
       - name: mcp-stateful-app
-        chartPath: helm-chart/
+        chartPath: charts/mcp-stateful-app/
         valuesFiles:
-          - helm-chart/values.yaml
+          - charts/mcp-stateful-app/values.yaml
         namespace: mcp-stateful-app

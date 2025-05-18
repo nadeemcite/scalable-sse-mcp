@@ -23,15 +23,13 @@ persistence:
   size: 1Gi
 
 hpa:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 5
+  enabled: true
+  maxReplicas: 10
   targetCPUUtilizationPercentage: 50
 
 nginx:
   enabled: true
   replicaCount: 2
-  fastapiReplicas: 3
   image:
     repository: openresty/openresty
     tag: alpine

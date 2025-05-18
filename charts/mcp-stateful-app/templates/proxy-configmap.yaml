@@ -23,7 +23,7 @@ data:
 
       upstream fastapi_hash {
         hash $arg_sessionid consistent;
-        {{- $replicas := .Values.nginx.fastapiReplicas | default 0 | int }}
+        {{- $replicas := .Values.replicaCount | default 0 | int }}
         {{- range $i := until $replicas }}
         server {{ include "fastapi-stateful.fullname" $ }}-{{ $i }}.{{ include "fastapi-stateful.fullname" $ }}-headless.{{ $.Release.Namespace }}.svc.cluster.local:{{ $.Values.service.port }};
         {{- end }}
