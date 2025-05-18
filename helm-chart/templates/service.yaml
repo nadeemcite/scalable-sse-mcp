@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "fastapi-stateful.fullname" . }}-headless
+spec:
+  clusterIP: None
+  selector:
+    app: {{ include "fastapi-stateful.name" . }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.port }}

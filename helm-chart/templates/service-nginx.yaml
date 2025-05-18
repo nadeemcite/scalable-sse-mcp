@@ -1,0 +1,13 @@
+{{- if .Values.nginx.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nginx.fullname" . }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.nginx.service.port }}
+      targetPort: {{ .Values.nginx.service.port }}
+  selector:
+    app: {{ include "nginx.fullname" . }}
+{{- end }}

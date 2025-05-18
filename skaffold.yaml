@@ -1,0 +1,22 @@
+apiVersion: skaffold/v4beta13
+kind: Config
+metadata:
+  name: mcp-stateful-app
+
+build:
+  artifacts:
+    - image: myfastapimcp/stateful-app-api
+      context: app
+      docker:
+        dockerfile: Dockerfile
+  tagPolicy:
+    sha256: {}
+
+deploy:
+  helm:
+    releases:
+      - name: mcp-stateful-app
+        chartPath: helm-chart/
+        valuesFiles:
+          - helm-chart/values.yaml
+        namespace: mcp-stateful-app

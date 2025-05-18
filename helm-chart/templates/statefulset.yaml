@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "fastapi-stateful.fullname" . }}
+  labels:
+    app: {{ include "fastapi-stateful.name" . }}
+spec:
+  serviceName: "{{ include "fastapi-stateful.fullname" . }}-headless"
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "fastapi-stateful.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "fastapi-stateful.name" . }}
+    spec:
+      containers:
+        - name: {{ include "fastapi-stateful.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+          

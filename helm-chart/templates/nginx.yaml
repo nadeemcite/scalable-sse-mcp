@@ -1,0 +1,54 @@
+{{- if .Values.nginx.enabled | default false }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nginx.fullname" . }}
+  labels:
+    app: {{ include "nginx.fullname" . }}
+spec:
+  replicas: {{ .Values.nginx.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "nginx.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "nginx.fullname" . }}
+    spec:
+      initContainers:
+        - name: wait-for-fastapi
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              echo searching fastapi-0;
+              until nc -z {{ include "fastapi-stateful.fullname" . }}-0.{{ include "fastapi-stateful.fullname" . }}-headless.{{ .Release.Namespace }}.svc.cluster.local {{ .Values.service.port }}; do
+                echo waiting for fastapi-0;
+                sleep 2;
+              done
+      containers:
+        - name: nginx
+          image: "{{ .Values.nginx.image.repository }}:{{ .Values.nginx.image.tag }}"
+          imagePullPolicy: {{ .Values.nginx.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.nginx.service.port }}
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/openresty/nginx/conf/nginx.conf
+              subPath: nginx.conf
+          resources:
+            requests:
+              cpu: {{ .Values.nginx.resources.requests.cpu }}
+              memory: {{ .Values.nginx.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.nginx.resources.limits.cpu }}
+              memory: {{ .Values.nginx.resources.limits.memory }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "nginx.fullname" . }}-config
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+{{- end }}
