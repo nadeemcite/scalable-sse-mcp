@@ -14,13 +14,15 @@ data:
       resolver 10.96.0.10 valid=30s;
       resolver_timeout 5s;
 
-      # stream immediately to client
       proxy_buffering    off;
       proxy_http_version 1.1;
       proxy_set_header   Connection "";
       proxy_read_timeout 60s;
       send_timeout       60s;
 
+      # ─────────────────────────────────────────
+      # 1) Stateful upstream (session affinity)
+      # ─────────────────────────────────────────
       upstream fastapi_hash {
         hash $arg_sessionid consistent;
         {{- $replicas := .Values.replicaCount | default 0 | int }}
@@ -29,51 +31,41 @@ data:
         {{- end }}
       }
 
+      # ─────────────────────────────────────────
+      # 2) Stateless upstream (round-robin)
+      # ─────────────────────────────────────────
+      upstream fastapi_lb {
+        # Point to your ClusterIP Service for load-balanced traffic
+        server {{ include "fastapi-stateful.fullname" . }}-headless.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }};
+      }
+
       server {
         listen {{ .Values.nginx.service.port }};
-        set $target '';
+        set $target "";
 
         # ─────────────────────────────────────────
-        # 1) SSE endpoint: extract sessionId from the event-stream
+        # A) SSE under /mcp will still be stateful
         # ─────────────────────────────────────────
         location = /sse {
-          proxy_pass http://fastapi_hash;
+          proxy_pass http://fastapi_hash;  # use consistent-hash backend
           proxy_set_header Host              $host;
           proxy_set_header X-Real-IP         $remote_addr;
           proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 
           header_filter_by_lua_block {
-            -- prepare to buffer only until we find the endpoint event
-            ngx.ctx.sse_buf    = ""
-            ngx.ctx.sse_done   = false
+            ngx.ctx.sse_buf  = ""
+            ngx.ctx.sse_done = false
           }
-
           body_filter_by_lua_block {
             local chunk = ngx.arg[1] or ""
-            -- always forward to client
             ngx.arg[1] = chunk
-
             if not ngx.ctx.sse_done then
-              -- accumulate until we spot the `event: endpoint` block
               ngx.ctx.sse_buf = ngx.ctx.sse_buf .. chunk
-
-              -- look for:
-              --   event: endpoint
-              --   data: /message?sessionId=…
-              local data = ngx.ctx.sse_buf:match(
-                "event:%s*endpoint%s-[\r\n]+data:%s*(.-)[\r\n]+"
-              )
-              
+              local data = ngx.ctx.sse_buf:match("event:%s*endpoint%s-[\r\n]+data:%s*(.-)[\r\n]+")
               if data then
-                -- extract the UUID
-                ngx.log(ngx.ERR, "sessionId: ", data)
                 local sessionid = data:match("session_id=([%w%-]+)")
-                ngx.log(ngx.ERR, "sessionId: ", sessionid)
                 if sessionid then
-                  ngx.log(ngx.ERR, "[SSE] got sessionId: ", sessionid)
                   local upstream_addr = ngx.var.upstream_addr or "unknown"
-
-                  -- schedule Redis SETEX in a timer (cosocket forbidden in filter)
                   ngx.timer.at(0, function(premature)
                     if premature then return end
                     local redis = require "resty.redis"
@@ -83,16 +75,10 @@ data:
                       "{{ include "redis.fullname" . }}-master.{{ .Release.Namespace }}.svc.cluster.local",
                       {{ .Values.redis.port }}
                     )
-                    if ok then
-                      r:setex(sessionid, 86400, upstream_addr)
-                    else
-                      ngx.log(ngx.ERR, "[SSE] redis connect error: ", err)
-                    end
+                    if ok then r:setex(sessionid, 86400, upstream_addr)
+                    else ngx.log(ngx.ERR, "[SSE] redis connect error: ", err) end
                   end)
-
-                  -- done, drop buffer
                   ngx.ctx.sse_done = true
-                  ngx.ctx.sse_buf  = nil
                 end
               end
             end
@@ -100,9 +86,9 @@ data:
         }
 
         # ─────────────────────────────────────────
-        # 2) All other routes: expect ?sessionid, lookup Redis, then proxy
+        # B) All other /mcp URLs are stateful
         # ─────────────────────────────────────────
-        location / {
+        location ~ ^/(sse|messages)/ {
           content_by_lua_block {
             local redis = require "resty.redis"
             local r     = redis:new()
@@ -111,24 +97,14 @@ data:
               "{{ include "redis.fullname" . }}-master.{{ .Release.Namespace }}.svc.cluster.local",
               {{ .Values.redis.port }}
             )
-            if not ok then
-              ngx.status = 500
-              ngx.say("Redis error: ", err)
-              return
-            end
+            if not ok then ngx.status = 500; ngx.say("Redis error: ", err); return end
 
             local sessionid = ngx.var.arg_session_id
-            if not sessionid then
-              ngx.status = 400
-              ngx.say("Missing sessionid")
-              return
-            end
+            if not sessionid then ngx.status = 400; ngx.say("Missing sessionid"); return end
 
             local upstream = r:get(sessionid)
             if upstream == ngx.null or not upstream then
-              ngx.status = 404
-              ngx.say("No upstream for sessionid")
-              return
+              ngx.status = 404; ngx.say("No upstream for sessionid"); return
             end
 
             ngx.var.target = "http://" .. upstream
@@ -136,8 +112,19 @@ data:
           }
         }
 
+        # Internal proxy pass to either upstream group
         location @proxy {
           proxy_pass $target;
+          proxy_set_header Host            $host;
+          proxy_set_header X-Real-IP       $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+        # ─────────────────────────────────────────
+        # C) Everything else: stateless load-balancing
+        # ─────────────────────────────────────────
+        location / {
+          proxy_pass http://fastapi_lb;
           proxy_set_header Host            $host;
           proxy_set_header X-Real-IP       $remote_addr;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

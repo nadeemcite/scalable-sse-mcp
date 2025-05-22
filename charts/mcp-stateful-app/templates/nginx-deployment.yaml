@@ -22,10 +22,11 @@ spec:
             - sh
             - -c
             - |
-              echo searching fastapi-0;
-              until nc -z {{ include "fastapi-stateful.fullname" . }}-0.{{ include "fastapi-stateful.fullname" . }}-headless.{{ .Release.Namespace }}.svc.cluster.local {{ .Values.service.port }}; do
-                echo waiting for fastapi-0;
-                sleep 2;
+              {{- $last := sub .Values.replicaCount 1 }}
+              echo "Searching for fastapi-{{$last}}…"  
+              until nc -z {{ include "fastapi-stateful.fullname" . }}-{{$last}}.{{ include "fastapi-stateful.fullname" . }}-headless.{{ .Release.Namespace }}.svc.cluster.local {{ .Values.service.port }}; do
+                echo "Waiting for fastapi-{{$last}}…"
+                sleep 2
               done
       containers:
         - name: nginx
